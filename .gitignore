@@ -22,3 +22,4 @@ wheels/
 .vscode/
 venv/
 env/
+train_with_codes.jsonl

@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dataset Browser</title>
+  <style>
+    :root {
+      --bg: #f5efe3;
+      --panel: rgba(255, 251, 243, 0.92);
+      --card: #fffdf8;
+      --ink: #1d1b17;
+      --muted: #6d665c;
+      --line: #ddd1bc;
+      --accent: #b5522f;
+      --accent-2: #2e6f5b;
+      --shadow: 0 18px 48px rgba(71, 52, 21, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(181, 82, 47, 0.16), transparent 32%),
+        radial-gradient(circle at top right, rgba(46, 111, 91, 0.16), transparent 34%),
+        linear-gradient(180deg, #f8f1e6 0%, #f1e9dc 100%);
+    }
+
+    .wrap {
+      width: min(1320px, calc(100% - 32px));
+      margin: 24px auto 48px;
+    }
+
+    .hero {
+      padding: 24px;
+      border: 1px solid rgba(221, 209, 188, 0.9);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(28px, 4vw, 42px);
+      letter-spacing: -0.03em;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      max-width: 780px;
+      line-height: 1.5;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .stat {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px 16px;
+    }
+
+    .stat .label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .stat .value {
+      display: block;
+      margin-top: 8px;
+      font-size: 26px;
+      font-weight: 700;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+      margin: 18px 0 20px;
+    }
+
+    .control {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .control label {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    select, input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      color: var(--ink);
+      font-size: 15px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .toolbar .status {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .toolbar .debug {
+      color: var(--accent-2);
+      font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      word-break: break-word;
+    }
+
+    .button {
+      padding: 10px 14px;
+      border: none;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .button.secondary {
+      background: var(--accent-2);
+    }
+
+    .records {
+      display: grid;
+      gap: 14px;
+    }
+
+    .record {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1.1fr 1fr;
+      padding: 18px;
+      border: 1px solid rgba(221, 209, 188, 0.95);
+      border-radius: 22px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+    }
+
+    .section {
+      background: linear-gradient(180deg, rgba(248, 243, 235, 0.9), rgba(255, 255, 255, 0.96));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .section h3 {
+      margin: 0 0 10px;
+      font-size: 16px;
+    }
+
+    .editor-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 12px;
+    }
+
+    .meta {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      word-break: break-word;
+    }
+
+    .transcript {
+      margin-top: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    textarea.transcript-input {
+      width: 100%;
+      min-height: 92px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      resize: vertical;
+      font: inherit;
+      line-height: 1.5;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    audio {
+      width: 100%;
+    }
+
+    .waveform {
+      width: 100%;
+      height: 120px;
+      display: block;
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(242,235,223,0.9));
+      cursor: crosshair;
+    }
+
+    .trim-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(120px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .trim-grid label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .trim-grid input {
+      padding: 10px 12px;
+    }
+
+    .empty {
+      padding: 26px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.65);
+    }
+
+    @media (max-width: 960px) {
+      .record {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>Mintaböngésző</h1>
+      <p class="subtitle">
+        Helyi JSONL adatkészlet böngészése. Szűrj nyelv és referencia alapján, majd hallgasd meg a referencia- és a célhangot az átiratokkal együtt.
+      </p>
+
+      <div class="stats">
+        <div class="stat">
+          <span class="label">Összes sor</span>
+          <span class="value" id="stat-records">0</span>
+        </div>
+        <div class="stat">
+          <span class="label">Referenciák</span>
+          <span class="value" id="stat-references">0</span>
+        </div>
+        <div class="stat">
+          <span class="label">Nyelvek</span>
+          <span class="value" id="stat-languages">0</span>
+        </div>
+        <div class="stat">
+          <span class="label">Találatok</span>
+          <span class="value" id="stat-visible">0</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="hero" style="margin-top: 18px;">
+      <div class="controls">
+        <div class="control">
+          <label for="language-select">Nyelv</label>
+          <select id="language-select">
+            <option value="">Minden nyelv</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="reference-select">Referencia</label>
+          <select id="reference-select">
+            <option value="">Minden referencia</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="text-filter">Szövegszűrés</label>
+          <input id="text-filter" type="text" placeholder="Keresés az átiratokban">
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="status" id="status">Betöltés...</div>
+        <button class="button secondary" id="clear-filters">Szűrők törlése</button>
+      </div>
+      <div class="toolbar">
+        <div class="debug" id="debug">debug: -</div>
+      </div>
+
+      <div class="records" id="records"></div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      summary: null,
+      records: [],
+      filteredRecords: [],
+      totalRecords: 0,
+      pageSize: 100,
+      offset: 0,
+      waveforms: new Map(),
+      audioBuffers: new Map(),
+      audioContext: null,
+      canvasControllers: new Map(),
+      activePlayback: null,
+      animationFrameId: null,
+    };
+
+    const languageSelect = document.getElementById("language-select");
+    const referenceSelect = document.getElementById("reference-select");
+    const textFilter = document.getElementById("text-filter");
+    const recordsRoot = document.getElementById("records");
+    const statusNode = document.getElementById("status");
+    const debugNode = document.getElementById("debug");
+    let pagerNode = null;
+
+    async function fetchJson(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || `HTTP ${response.status} ${response.statusText}`);
+      }
+      return response.json();
+    }
+
+    async function postJson(url, payload) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || `HTTP ${response.status} ${response.statusText}`);
+      }
+      return response.json();
+    }
+
+    function audioUrl(audioId) {
+      return `/audio/${encodeURIComponent(audioId)}`;
+    }
+
+    function referenceLabel(reference) {
+      return `${reference.audio_name} (${reference.count} sor)`;
+    }
+
+    function fillLanguageOptions(languages) {
+      for (const item of languages) {
+        const option = document.createElement("option");
+        option.value = item.language;
+        option.textContent = `${item.language} (${item.count})`;
+        languageSelect.appendChild(option);
+      }
+    }
+
+    function fillReferenceOptions() {
+      const selectedLanguage = languageSelect.value;
+      const selectedReference = referenceSelect.value;
+      referenceSelect.innerHTML = '<option value="">Minden referencia</option>';
+
+      const references = state.summary.references.filter((reference) => {
+        return !selectedLanguage || reference.language === selectedLanguage;
+      });
+
+      for (const reference of references) {
+        const option = document.createElement("option");
+        option.value = reference.id;
+        option.textContent = `${reference.language} | ${referenceLabel(reference)}`;
+        referenceSelect.appendChild(option);
+      }
+
+      if (references.some((reference) => reference.id === selectedReference)) {
+        referenceSelect.value = selectedReference;
+      }
+    }
+
+    async function loadSummary() {
+      state.summary = await fetchJson("/api/summary");
+      document.getElementById("stat-records").textContent = state.summary.record_count.toLocaleString("hu-HU");
+      document.getElementById("stat-references").textContent = state.summary.reference_count.toLocaleString("hu-HU");
+      document.getElementById("stat-languages").textContent = state.summary.languages.length.toLocaleString("hu-HU");
+      fillLanguageOptions(state.summary.languages);
+      fillReferenceOptions();
+    }
+
+    async function loadRecords() {
+      const params = new URLSearchParams();
+      if (languageSelect.value) {
+        params.set("language", languageSelect.value);
+      }
+      if (referenceSelect.value) {
+        params.set("reference", referenceSelect.value);
+      }
+      params.set("offset", String(state.offset));
+      params.set("limit", String(state.pageSize));
+      statusNode.textContent = "Sorok betöltése...";
+      const payload = await fetchJson(`/api/records?${params.toString()}`);
+      state.records = payload.records;
+      state.totalRecords = payload.total;
+      applyTextFilter();
+    }
+
+    function applyTextFilter() {
+      const query = textFilter.value.trim().toLocaleLowerCase("hu-HU");
+      state.filteredRecords = state.records.filter((record) => {
+        if (!query) {
+          return true;
+        }
+        return (
+          record.text.toLocaleLowerCase("hu-HU").includes(query) ||
+          record.ref_text.toLocaleLowerCase("hu-HU").includes(query) ||
+          record.audio_name.toLocaleLowerCase("hu-HU").includes(query) ||
+          record.ref_audio_name.toLocaleLowerCase("hu-HU").includes(query)
+        );
+      });
+      renderRecords();
+    }
+
+    function renderRecords() {
+      document.getElementById("stat-visible").textContent = state.filteredRecords.length.toLocaleString("hu-HU");
+      if (!state.filteredRecords.length) {
+        recordsRoot.innerHTML = '<div class="empty">Nincs a szűrőknek megfelelő találat.</div>';
+        statusNode.textContent = "Nincs találat.";
+        renderPager();
+        return;
+      }
+
+      const html = state.filteredRecords.map((record) => `
+        <article class="record">
+          <section class="section">
+            <h3>Referencia</h3>
+            <div class="meta">${escapeHtml(record.language)} | ${escapeHtml(record.ref_audio_name)}</div>
+            <canvas
+              class="waveform"
+              data-audio-id="${escapeHtml(record.ref_audio_id)}"
+              data-role="ref"
+              data-record-id="${record.id}"></canvas>
+            <div class="trim-grid">
+              <label>
+                Start
+                <input type="number" step="0.01" min="0" value="0" data-field="start" data-audio-id="${escapeHtml(record.ref_audio_id)}" data-record-id="${record.id}" data-role="ref">
+              </label>
+              <label>
+                End
+                <input type="number" step="0.01" min="0" value="0" data-field="end" data-audio-id="${escapeHtml(record.ref_audio_id)}" data-record-id="${record.id}" data-role="ref">
+              </label>
+            </div>
+            <div class="editor-row">
+              <button class="button trim-button" data-audio-id="${escapeHtml(record.ref_audio_id)}" data-record-id="${record.id}" data-role="ref">Referencia vágása</button>
+            </div>
+            <textarea class="transcript-input" data-kind="ref_text" data-record-id="${record.id}">${escapeHtml(record.ref_text)}</textarea>
+          </section>
+          <section class="section">
+            <h3>Cél audio</h3>
+            <div class="meta">${escapeHtml(record.audio_name)}</div>
+            <canvas
+              class="waveform"
+              data-audio-id="${escapeHtml(record.audio_id)}"
+              data-role="audio"
+              data-record-id="${record.id}"></canvas>
+            <div class="trim-grid">
+              <label>
+                Start
+                <input type="number" step="0.01" min="0" value="0" data-field="start" data-audio-id="${escapeHtml(record.audio_id)}" data-record-id="${record.id}" data-role="audio">
+              </label>
+              <label>
+                End
+                <input type="number" step="0.01" min="0" value="0" data-field="end" data-audio-id="${escapeHtml(record.audio_id)}" data-record-id="${record.id}" data-role="audio">
+              </label>
+            </div>
+            <div class="editor-row">
+              <button class="button trim-button" data-audio-id="${escapeHtml(record.audio_id)}" data-record-id="${record.id}" data-role="audio">Audio vágása</button>
+              <button class="button secondary save-text-button" data-record-id="${record.id}">Szövegek mentése</button>
+            </div>
+            <textarea class="transcript-input" data-kind="text" data-record-id="${record.id}">${escapeHtml(record.text)}</textarea>
+          </section>
+        </article>
+      `).join("");
+
+      recordsRoot.innerHTML = html;
+      const from = Math.min(state.offset + 1, state.totalRecords);
+      const to = Math.min(state.offset + state.records.length, state.totalRecords);
+      statusNode.textContent =
+        `${from.toLocaleString("hu-HU")}–${to.toLocaleString("hu-HU")} / ` +
+        `${state.totalRecords.toLocaleString("hu-HU")} szerveroldali találat, ` +
+        `${state.filteredRecords.length.toLocaleString("hu-HU")} látható ezen az oldalon.`;
+      renderPager();
+      hydrateEditors();
+    }
+
+    function renderPager() {
+      if (!pagerNode) {
+        pagerNode = document.createElement("div");
+        pagerNode.className = "toolbar";
+        recordsRoot.after(pagerNode);
+      }
+
+      const prevDisabled = state.offset <= 0 ? "disabled" : "";
+      const nextDisabled = state.offset + state.pageSize >= state.totalRecords ? "disabled" : "";
+      const from = state.totalRecords ? state.offset + 1 : 0;
+      const to = Math.min(state.offset + state.pageSize, state.totalRecords);
+
+      pagerNode.innerHTML = `
+        <div class="status">${from.toLocaleString("hu-HU")}–${to.toLocaleString("hu-HU")} / ${state.totalRecords.toLocaleString("hu-HU")} sor</div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="button secondary" id="prev-page" ${prevDisabled}>Előző 100</button>
+          <button class="button" id="next-page" ${nextDisabled}>Következő 100</button>
+        </div>
+      `;
+
+      const prevButton = document.getElementById("prev-page");
+      const nextButton = document.getElementById("next-page");
+      if (prevButton) {
+        prevButton.addEventListener("click", async () => {
+          state.offset = Math.max(0, state.offset - state.pageSize);
+          await loadRecords();
+        });
+      }
+      if (nextButton) {
+        nextButton.addEventListener("click", async () => {
+          if (state.offset + state.pageSize < state.totalRecords) {
+            state.offset += state.pageSize;
+            await loadRecords();
+          }
+        });
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function rawValue(value) {
+      return String(value)
+        .replaceAll("&lt;", "<")
+        .replaceAll("&gt;", ">")
+        .replaceAll("&quot;", '"')
+        .replaceAll("&#39;", "'")
+        .replaceAll("&amp;", "&");
+    }
+
+    async function loadWaveform(audioId) {
+      if (state.waveforms.has(audioId)) {
+        return state.waveforms.get(audioId);
+      }
+      const payload = await fetchJson(`/api/waveform?audio_id=${encodeURIComponent(audioId)}&points=1400`);
+      state.waveforms.set(audioId, payload);
+      return payload;
+    }
+
+    function drawWaveform(canvas, waveform, startSec, endSec, playheadSec = null) {
+      const width = canvas.clientWidth || 640;
+      const height = canvas.clientHeight || 120;
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, width, height);
+
+      ctx.fillStyle = "#fffaf0";
+      ctx.fillRect(0, 0, width, height);
+
+      const peaks = waveform.peaks || [];
+      const duration = waveform.duration || 0;
+      const center = height / 2;
+      const step = peaks.length > 0 ? width / peaks.length : width;
+
+      ctx.strokeStyle = "#b5522f";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i < peaks.length; i++) {
+        const x = i * step;
+        const peak = peaks[i] * (height * 0.42);
+        ctx.moveTo(x, center - peak);
+        ctx.lineTo(x, center + peak);
+      }
+      ctx.stroke();
+
+      if (duration > 0 && endSec > startSec) {
+        const startX = (startSec / duration) * width;
+        const endX = (endSec / duration) * width;
+        ctx.fillStyle = "rgba(46, 111, 91, 0.18)";
+        ctx.fillRect(startX, 0, endX - startX, height);
+        ctx.strokeStyle = "#2e6f5b";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, 0);
+        ctx.lineTo(startX, height);
+        ctx.moveTo(endX, 0);
+        ctx.lineTo(endX, height);
+        ctx.stroke();
+
+        ctx.fillStyle = "#2e6f5b";
+        ctx.fillRect(startX - 3, 0, 6, height);
+        ctx.fillRect(endX - 3, 0, 6, height);
+      }
+
+      if (playheadSec !== null && duration > 0) {
+        const playX = Math.max(0, Math.min(width, (playheadSec / duration) * width));
+        ctx.strokeStyle = "#134e9b";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(playX, 0);
+        ctx.lineTo(playX, height);
+        ctx.stroke();
+      }
+    }
+
+    function findSelectionInputs(recordId, role) {
+      return {
+        start: document.querySelector(`input[data-field="start"][data-record-id="${recordId}"][data-role="${role}"]`),
+        end: document.querySelector(`input[data-field="end"][data-record-id="${recordId}"][data-role="${role}"]`),
+      };
+    }
+
+    function getSelection(inputs) {
+      return {
+        startSec: Number(inputs.start.value || 0),
+        endSec: Number(inputs.end.value || 0),
+      };
+    }
+
+    function getAudioContext() {
+      if (!state.audioContext) {
+        const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+        state.audioContext = new AudioContextCtor();
+      }
+      return state.audioContext;
+    }
+
+    async function loadAudioBuffer(audioId) {
+      if (state.audioBuffers.has(audioId)) {
+        return state.audioBuffers.get(audioId);
+      }
+      const response = await fetch(audioUrl(audioId));
+      if (!response.ok) {
+        throw new Error(`Audio betöltési hiba: ${response.status}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      const context = getAudioContext();
+      const decoded = await context.decodeAudioData(arrayBuffer.slice(0));
+      state.audioBuffers.set(audioId, decoded);
+      return decoded;
+    }
+
+    function stopPlayback() {
+      if (!state.activePlayback) {
+        return;
+      }
+      const { source, controller } = state.activePlayback;
+      try {
+        source.stop();
+      } catch (error) {
+      }
+      source.onended = null;
+      if (state.animationFrameId !== null) {
+        cancelAnimationFrame(state.animationFrameId);
+        state.animationFrameId = null;
+      }
+      state.activePlayback = null;
+      if (controller) {
+        controller.render();
+      }
+    }
+
+    function tickPlayback() {
+      if (!state.activePlayback) {
+        return;
+      }
+      const { controller, endSec, startedAtContextSec, startOffsetSec } = state.activePlayback;
+      const context = getAudioContext();
+      const currentSec = startOffsetSec + (context.currentTime - startedAtContextSec);
+      if (currentSec >= endSec) {
+        state.activePlayback = null;
+        controller.render();
+        return;
+      }
+      controller.render();
+      state.animationFrameId = requestAnimationFrame(tickPlayback);
+    }
+
+    async function playSegment(audioId, controller, startSec, endSec) {
+      const context = getAudioContext();
+      if (context.state === "suspended") {
+        await context.resume();
+      }
+      const buffer = await loadAudioBuffer(audioId);
+      stopPlayback();
+      if (state.animationFrameId !== null) {
+        cancelAnimationFrame(state.animationFrameId);
+        state.animationFrameId = null;
+      }
+      const safeStart = Math.max(0, Math.min(startSec, buffer.duration));
+      const safeEnd = Math.max(safeStart, Math.min(endSec, buffer.duration));
+      const playDuration = safeEnd - safeStart;
+      if (playDuration <= 0) {
+        return;
+      }
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      const startedAtContextSec = context.currentTime;
+      state.activePlayback = {
+        audioId,
+        source,
+        controller,
+        startOffsetSec: safeStart,
+        endSec: safeEnd,
+        startedAtContextSec,
+      };
+      source.onended = () => {
+        if (state.activePlayback && state.activePlayback.source === source) {
+          state.activePlayback = null;
+          controller.render();
+        }
+      };
+      source.start(0, safeStart, playDuration);
+      controller.render();
+      state.animationFrameId = requestAnimationFrame(tickPlayback);
+    }
+
+    function setDebug(message) {
+      debugNode.textContent = `debug: ${message}`;
+    }
+
+    function setupCanvasSelection(canvas, waveform) {
+      const recordId = canvas.dataset.recordId;
+      const role = canvas.dataset.role;
+      const audioId = canvas.dataset.audioId;
+      const inputs = findSelectionInputs(recordId, role);
+      if (!inputs.start || !inputs.end) {
+        return;
+      }
+      const duration = waveform.duration || 0;
+      if (Number(inputs.end.value) === 0 && duration > 0) {
+        inputs.end.value = duration.toFixed(2);
+      }
+
+      let pointerStart = null;
+      let isDragging = false;
+      let dragMode = null;
+      const toSeconds = (clientX) => {
+        const rect = canvas.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        return ratio * duration;
+      };
+      const handleToleranceSec = () => {
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width || duration <= 0) {
+          return 0.05;
+        }
+        return Math.max(0.03, (8 / rect.width) * duration);
+      };
+
+      const redraw = () => {
+        const playheadSec =
+          state.activePlayback && state.activePlayback.audioId === audioId
+            ? state.activePlayback.startOffsetSec + (getAudioContext().currentTime - state.activePlayback.startedAtContextSec)
+            : null;
+        drawWaveform(
+          canvas,
+          waveform,
+          Number(inputs.start.value || 0),
+          Number(inputs.end.value || 0),
+          playheadSec
+        );
+      };
+
+      const controllerKey = `${recordId}:${role}`;
+      state.canvasControllers.set(controllerKey, { canvas, waveform, inputs, render: redraw, audioId });
+
+      inputs.start.addEventListener("input", redraw);
+      inputs.end.addEventListener("input", redraw);
+
+      canvas.addEventListener("pointerdown", (event) => {
+        const selection = getSelection(inputs);
+        const clickedSec = toSeconds(event.clientX);
+        pointerStart = {
+          clientX: event.clientX,
+          seconds: clickedSec,
+          selectionStart: selection.startSec,
+          selectionEnd: selection.endSec,
+        };
+        isDragging = false;
+        dragMode = "create-selection";
+        const tolerance = handleToleranceSec();
+        const nearStart = Math.abs(clickedSec - selection.startSec) <= tolerance;
+        const nearEnd = Math.abs(clickedSec - selection.endSec) <= tolerance;
+        const insideSelection =
+          selection.endSec - selection.startSec > tolerance &&
+          clickedSec > selection.startSec &&
+          clickedSec < selection.endSec;
+        if (nearStart) {
+          dragMode = "resize-start";
+        } else if (nearEnd) {
+          dragMode = "resize-end";
+        } else if (insideSelection) {
+          dragMode = "move-selection";
+        }
+        setDebug(
+          `down role=${role} click=${clickedSec.toFixed(3)} sel=[${selection.startSec.toFixed(3)},${selection.endSec.toFixed(3)}] mode=${dragMode}`
+        );
+        canvas.setPointerCapture(event.pointerId);
+      });
+
+      canvas.addEventListener("pointermove", (event) => {
+        if (pointerStart === null) {
+          return;
+        }
+        const delta = Math.abs(event.clientX - pointerStart.clientX);
+        if (delta < 5 && !isDragging) {
+          return;
+        }
+        isDragging = true;
+        const current = toSeconds(event.clientX);
+        if (dragMode === "create-selection") {
+          const start = Math.min(pointerStart.seconds, current);
+          const end = Math.max(pointerStart.seconds, current);
+          inputs.start.value = start.toFixed(2);
+          inputs.end.value = end.toFixed(2);
+        } else if (dragMode === "resize-start") {
+          const nextStart = Math.max(0, Math.min(current, Number(inputs.end.value || 0) - 0.01));
+          inputs.start.value = nextStart.toFixed(2);
+        } else if (dragMode === "resize-end") {
+          const nextEnd = Math.min(duration, Math.max(current, Number(inputs.start.value || 0) + 0.01));
+          inputs.end.value = nextEnd.toFixed(2);
+        } else if (dragMode === "move-selection") {
+          const width = pointerStart.selectionEnd - pointerStart.selectionStart;
+          const delta = current - pointerStart.seconds;
+          const maxStart = Math.max(0, duration - width);
+          const nextStart = Math.max(0, Math.min(pointerStart.selectionStart + delta, maxStart));
+          const nextEnd = Math.min(duration, nextStart + width);
+          inputs.start.value = nextStart.toFixed(2);
+          inputs.end.value = nextEnd.toFixed(2);
+        }
+        redraw();
+        setDebug(
+          `move role=${role} mode=${dragMode} sel=[${Number(inputs.start.value || 0).toFixed(3)},${Number(inputs.end.value || 0).toFixed(3)}]`
+        );
+      });
+
+      canvas.addEventListener("pointerup", async (event) => {
+        if (pointerStart === null) {
+          return;
+        }
+        const clickedSec = toSeconds(event.clientX);
+        if (!isDragging) {
+          const selection = getSelection(inputs);
+          const hasSelection = selection.endSec - selection.startSec > 0.05;
+          const clickedInSelection =
+            hasSelection &&
+            clickedSec >= selection.startSec &&
+            clickedSec <= selection.endSec;
+          let playStart = clickedSec;
+          let playEnd = duration;
+          if (clickedInSelection || dragMode === "move-selection" || dragMode === "resize-start" || dragMode === "resize-end") {
+            playStart = selection.startSec;
+            playEnd = selection.endSec;
+          }
+          setDebug(
+            `up role=${role} click=${clickedSec.toFixed(3)} mode=${dragMode} sel=[${selection.startSec.toFixed(3)},${selection.endSec.toFixed(3)}] play=[${playStart.toFixed(3)},${playEnd.toFixed(3)}]`
+          );
+          try {
+            await playSegment(audioId, state.canvasControllers.get(controllerKey), playStart, playEnd);
+          } catch (error) {
+            statusNode.textContent = `Lejátszási hiba: ${error.message}`;
+            setDebug(`play error: ${error.message}`);
+          }
+        }
+        pointerStart = null;
+        isDragging = false;
+        dragMode = null;
+        canvas.releasePointerCapture(event.pointerId);
+      });
+
+      const stopDragging = () => {
+        pointerStart = null;
+        isDragging = false;
+        dragMode = null;
+      };
+      canvas.addEventListener("pointerleave", stopDragging);
+      canvas.addEventListener("pointercancel", stopDragging);
+      redraw();
+    }
+
+    async function saveTexts(recordId) {
+      const textNode = document.querySelector(`textarea[data-kind="text"][data-record-id="${recordId}"]`);
+      const refTextNode = document.querySelector(`textarea[data-kind="ref_text"][data-record-id="${recordId}"]`);
+      await postJson("/api/update-text", {
+        record_id: Number(recordId),
+        text: textNode.value,
+        ref_text: refTextNode.value,
+      });
+      statusNode.textContent = `A ${recordId}. rekord szövegei mentve.`;
+      await loadRecords();
+    }
+
+    async function trimAudio(audioId, recordId, role) {
+      const inputs = findSelectionInputs(recordId, role);
+      const startSec = Number(inputs.start.value || 0);
+      const endSec = Number(inputs.end.value || 0);
+      await postJson("/api/trim-audio", {
+        audio_id: audioId,
+        start_sec: startSec,
+        end_sec: endSec,
+      });
+      stopPlayback();
+      state.waveforms.delete(audioId);
+      state.audioBuffers.delete(audioId);
+      statusNode.textContent = `${role === "ref" ? "Referencia" : "Audio"} megvágva.`;
+      await loadRecords();
+    }
+
+    function hydrateEditors() {
+      stopPlayback();
+      state.canvasControllers.clear();
+      const canvases = [...document.querySelectorAll("canvas.waveform")];
+      for (const canvas of canvases) {
+        loadWaveform(canvas.dataset.audioId)
+          .then((waveform) => setupCanvasSelection(canvas, waveform))
+          .catch((error) => {
+            const ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, canvas.width || 640, canvas.height || 120);
+            ctx.fillStyle = "#7b7468";
+            ctx.font = "14px sans-serif";
+            ctx.fillText(`Hullámforma hiba: ${error.message}`, 12, 32);
+          });
+      }
+
+      for (const button of document.querySelectorAll(".save-text-button")) {
+        button.addEventListener("click", async () => {
+          try {
+            await saveTexts(button.dataset.recordId);
+          } catch (error) {
+            statusNode.textContent = `Mentési hiba: ${error.message}`;
+          }
+        });
+      }
+
+      for (const button of document.querySelectorAll(".trim-button")) {
+        button.addEventListener("click", async () => {
+          try {
+            await trimAudio(button.dataset.audioId, button.dataset.recordId, button.dataset.role);
+          } catch (error) {
+            statusNode.textContent = `Vágási hiba: ${error.message}`;
+          }
+        });
+      }
+    }
+
+    async function refresh() {
+      state.offset = 0;
+      fillReferenceOptions();
+      await loadRecords();
+    }
+
+    document.getElementById("clear-filters").addEventListener("click", async () => {
+      languageSelect.value = "";
+      fillReferenceOptions();
+      referenceSelect.value = "";
+      textFilter.value = "";
+      state.offset = 0;
+      await loadRecords();
+    });
+
+    languageSelect.addEventListener("change", refresh);
+    referenceSelect.addEventListener("change", async () => {
+      state.offset = 0;
+      await loadRecords();
+    });
+    textFilter.addEventListener("input", applyTextFilter);
+
+    async function bootstrap() {
+      try {
+        await loadSummary();
+        await loadRecords();
+      } catch (error) {
+        recordsRoot.innerHTML = `<div class="empty">Betöltési hiba: ${escapeHtml(error.message)}</div>`;
+        statusNode.textContent = "Betöltési hiba.";
+      }
+    }
+
+    bootstrap();
+  </script>
+</body>
+</html>

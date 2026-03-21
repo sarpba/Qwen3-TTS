@@ -1,36 +1,45 @@
-## Fine Tuning Qwen3-TTS-12Hz-1.7B/0.6B-Base
+## Fine-Tuning Qwen3-TTS-12Hz Base For Multilingual Voice Clone
 
-The Qwen3-TTS-12Hz-1.7B/0.6B-Base model series currently supports single-speaker fine-tuning. Please run `pip install qwen-tts` first, then run the command below:
+This workflow keeps the checkpoint as a `base` model, so the result stays compatible with `generate_voice_clone(...)` and `create_voice_clone_prompt(...)`.
 
-```
+It is designed for adding a new language to the existing multilingual Base model, while keeping the original voice-clone path intact. The same script works with both `Qwen3-TTS-12Hz-1.7B-Base` and `Qwen3-TTS-12Hz-0.6B-Base`.
+
+```bash
 git clone https://github.com/QwenLM/Qwen3-TTS.git
 cd Qwen3-TTS/finetuning
 ```
 
-Then follow the steps below to complete the entire fine-tuning workflow. Multi-speaker fine-tuning and other advanced fine-tuning features will be supported in future releases.
-
 ### 1) Input JSONL format
 
-Prepare your training file as a JSONL (one JSON object per line). Each line must contain:
+Prepare a JSONL file where each line contains:
 
-- `audio`: path to the target training audio (wav)
-- `text`: transcript corresponding to `audio`
-- `ref_audio`: path to the reference speaker audio (wav)
+- `audio`: target training audio path
+- `text`: transcript for `audio`
+- `ref_audio`: reference audio path used for voice cloning
+- `ref_text`: transcript of `ref_audio`
+- `language`: canonical language name, for example `Hungarian`, `English`, `German`
 
 Example:
+
 ```jsonl
-{"audio":"./data/utt0001.wav","text":"其实我真的有发现，我是一个特别善于观察别人情绪的人。","ref_audio":"./data/ref.wav"}
-{"audio":"./data/utt0002.wav","text":"She said she would be here by noon.","ref_audio":"./data/ref.wav"}
+{"audio":"./data/utt0001.wav","text":"Ez egy magyar mondat.","ref_audio":"./data/ref.wav","ref_text":"Ez a referenciahang szövege.","language":"Hungarian"}
+{"audio":"./data/utt0002.wav","text":"This line keeps a bit of English in the mix.","ref_audio":"./data/ref.wav","ref_text":"This is the reference transcript.","language":"English"}
 ```
 
-`ref_audio` recommendation:
-- Strongly recommended: use the same `ref_audio` for all samples.
-- Keeping `ref_audio` identical across the dataset usually improves speaker consistency and stability during generation.
+Notes:
 
+- `language` is required on every row.
+- The scripts accept `tef_text` as a legacy typo alias, but the canonical field name is `ref_text`.
+- Reusing the same `ref_audio` across many samples is usually the most stable setup.
 
-### 2) Prepare data (extract `audio_codes`)
+### 2) Prepare data
 
-Convert `train_raw.jsonl` into a training JSONL that includes `audio_codes`:
+`prepare_data.py` extracts:
+
+- `audio_codes`: 12 Hz tokenizer codes for the target `audio`
+- `ref_audio_codes`: 12 Hz tokenizer codes for the reference `ref_audio`
+
+These fields are stored as JSON lists with shape `T x 16`, where `T` is the codec length in frames and `16` is the number of code groups used by the 12 Hz tokenizer.
 
 ```bash
 python prepare_data.py \
@@ -40,10 +49,18 @@ python prepare_data.py \
   --output_jsonl train_with_codes.jsonl
 ```
 
+If `audio_codes` or `ref_audio_codes` already exist in the input JSONL, they are kept and only the missing side is generated.
 
 ### 3) Fine-tune
 
-Run SFT using the prepared JSONL:
+The script:
+
+- keeps `tts_model_type=base`
+- registers the new language in `talker_config.codec_language_id`
+- initializes the new language embedding from an existing language
+- mixes ICL and x-vector-only training, with ICL kept dominant by default
+
+Hungarian example:
 
 ```bash
 python sft_12hz.py \
@@ -53,17 +70,27 @@ python sft_12hz.py \
   --batch_size 32 \
   --lr 2e-6 \
   --num_epochs 10 \
-  --speaker_name speaker_test
+  --new_language Hungarian \
+  --new_language_init_from German \
+  --xvector_only_ratio 0.2
 ```
 
-Checkpoints will be written to:
+Key arguments:
+
+- `--new_language`: new language name to register, for example `Hungarian`
+- `--new_language_init_from`: existing language used to initialize the new language embedding, for example `German`
+- `--new_language_codec_id`: optional manual token id; if omitted, the next free condition token id is used
+- `--xvector_only_ratio`: fraction of batches trained in `x_vector_only` mode; `0.0` means ICL-only training
+
+Checkpoints are written to:
+
 - `output/checkpoint-epoch-0`
 - `output/checkpoint-epoch-1`
 - `output/checkpoint-epoch-2`
-- ...
-
 
 ### 4) Quick inference test
+
+The finetuning script builds prompts in non-streaming style, so `non_streaming_mode=True` is the recommended inference setting for the resulting checkpoint.
 
 ```python
 import torch
@@ -78,9 +105,12 @@ tts = Qwen3TTSModel.from_pretrained(
     attn_implementation="flash_attention_2",
 )
 
-wavs, sr = tts.generate_custom_voice(
-    text="She said she would be here by noon.",
-    speaker="speaker_test",
+wavs, sr = tts.generate_voice_clone(
+    text="A finetuned modell most mar tud magyarul beszelni.",
+    language="Hungarian",
+    ref_audio="./data/ref.wav",
+    ref_text="Ez a referenciahang szovege.",
+    non_streaming_mode=True,
 )
 sf.write("output.wav", wavs[0], sr)
 ```
@@ -102,7 +132,9 @@ OUTPUT_DIR="output"
 BATCH_SIZE=2
 LR=2e-5
 EPOCHS=3
-SPEAKER_NAME="speaker_1"
+NEW_LANGUAGE="Hungarian"
+INIT_FROM_LANGUAGE="German"
+XVECTOR_ONLY_RATIO=0.2
 
 python prepare_data.py \
   --device ${DEVICE} \
@@ -117,5 +149,7 @@ python sft_12hz.py \
   --batch_size ${BATCH_SIZE} \
   --lr ${LR} \
   --num_epochs ${EPOCHS} \
-  --speaker_name ${SPEAKER_NAME}
+  --new_language ${NEW_LANGUAGE} \
+  --new_language_init_from ${INIT_FROM_LANGUAGE} \
+  --xvector_only_ratio ${XVECTOR_ONLY_RATIO}
 ```
