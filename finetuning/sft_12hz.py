@@ -199,6 +199,24 @@ def train():
         log_with="tensorboard",
         project_config=project_config,
     )
+    accelerator.init_trackers(
+        project_name="qwen3_tts_sft_12hz",
+        config={
+            "init_model_path": args.init_model_path,
+            "train_jsonl": args.train_jsonl,
+            "batch_size": args.batch_size,
+            "lr": args.lr,
+            "num_epochs": args.num_epochs,
+            "gradient_accumulation_steps": args.gradient_accumulation_steps,
+            "mixed_precision": args.mixed_precision,
+            "xvector_only_ratio": args.xvector_only_ratio,
+            "sub_talker_loss_weight": args.sub_talker_loss_weight,
+            "new_language": args.new_language,
+            "new_language_init_from": args.new_language_init_from,
+            "new_language_codec_id": args.new_language_codec_id,
+            "save_steps": args.save_steps,
+        },
+    )
 
     qwen3tts = Qwen3TTSModel.from_pretrained(
         args.init_model_path,
@@ -330,6 +348,15 @@ def train():
                     f"Epoch {epoch} | Step {step} | GlobalStep {global_step} | Loss: {loss.item():.4f} | "
                     f"CE: {outputs.loss.item():.4f} | Sub: {sub_talker_loss.item():.4f}"
                 )
+                accelerator.log(
+                    {
+                        "train/loss": loss.item(),
+                        "train/ce": outputs.loss.item(),
+                        "train/sub": sub_talker_loss.item(),
+                        "train/epoch": float(epoch),
+                    },
+                    step=global_step,
+                )
 
             if args.save_steps > 0 and global_step % args.save_steps == 0:
                 _save_checkpoint(
@@ -349,6 +376,8 @@ def train():
             output_model_path=args.output_model_path,
             checkpoint_name=f"checkpoint-epoch-{epoch}",
         )
+
+    accelerator.end_training()
 
 
 if __name__ == "__main__":
