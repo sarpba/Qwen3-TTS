@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import argparse
+import copy
 import json
 import os
 from typing import Dict
@@ -47,6 +48,7 @@ def parse_args():
     parser.add_argument("--xvector_only_ratio", type=float, default=0.2)
     parser.add_argument("--sub_talker_loss_weight", type=float, default=0.3)
     parser.add_argument("--log_steps", type=int, default=10)
+    parser.add_argument("--save_steps", type=int, default=0)
     parser.add_argument("--new_language", type=str, required=True)
     parser.add_argument("--new_language_init_from", type=str, default="German")
     parser.add_argument("--new_language_codec_id", type=int, default=None)
@@ -132,13 +134,13 @@ def _register_new_language(model, language_name: str, init_from_language: str, r
     return new_language_key, new_language_id
 
 
-def _save_checkpoint(accelerator, model, processor, output_model_path, epoch):
+def _save_checkpoint(accelerator, model, processor, output_model_path, checkpoint_name):
     accelerator.wait_for_everyone()
     state_dict = accelerator.get_state_dict(model)
     if not accelerator.is_main_process:
         return
 
-    output_dir = os.path.join(output_model_path, f"checkpoint-epoch-{epoch}")
+    output_dir = os.path.join(output_model_path, checkpoint_name)
     os.makedirs(output_dir, exist_ok=True)
 
     unwrapped_model = accelerator.unwrap_model(model)
@@ -146,12 +148,40 @@ def _save_checkpoint(accelerator, model, processor, output_model_path, epoch):
     unwrapped_model.supported_languages = _build_supported_languages(
         unwrapped_model.config.talker_config.codec_language_id
     )
-    unwrapped_model.save_pretrained(
-        output_dir,
-        state_dict=state_dict,
-        safe_serialization=True,
-        save_function=accelerator.save,
-    )
+    original_config_save_pretrained = unwrapped_model.config.save_pretrained
+
+    def _sanitize_for_json(value):
+        if isinstance(value, dict):
+            return {key: _sanitize_for_json(item) for key, item in value.items() if not callable(item)}
+        if isinstance(value, list):
+            return [_sanitize_for_json(item) for item in value]
+        if isinstance(value, tuple):
+            return [_sanitize_for_json(item) for item in value]
+        if callable(value):
+            return None
+        return value
+
+    def _save_config_without_diff(save_directory, **kwargs):
+        os.makedirs(save_directory, exist_ok=True)
+        output_config_file = os.path.join(save_directory, "config.json")
+        config_dict = copy.deepcopy(unwrapped_model.config.to_dict())
+        config_dict.pop("save_pretrained", None)
+        config_dict = _sanitize_for_json(config_dict)
+        with open(output_config_file, "w", encoding="utf-8") as writer:
+            json.dump(config_dict, writer, ensure_ascii=False, indent=2, sort_keys=True)
+            writer.write("\n")
+
+    unwrapped_model.config.save_pretrained = _save_config_without_diff
+    try:
+        unwrapped_model.save_pretrained(
+            output_dir,
+            state_dict=state_dict,
+            safe_serialization=True,
+            save_function=accelerator.save,
+        )
+    finally:
+        unwrapped_model.config.save_pretrained = original_config_save_pretrained
+
     processor.save_pretrained(output_dir)
 
 
@@ -227,9 +257,11 @@ def train():
     )
 
     model.train()
+    global_step = 0
 
     for epoch in range(args.num_epochs):
         for step, batch in enumerate(train_dataloader):
+            global_step += 1
             with accelerator.accumulate(model):
                 input_ids = batch["input_ids"]
                 codec_ids = batch["codec_ids"]
@@ -295,16 +327,27 @@ def train():
 
             if step % args.log_steps == 0:
                 accelerator.print(
-                    f"Epoch {epoch} | Step {step} | Loss: {loss.item():.4f} | "
+                    f"Epoch {epoch} | Step {step} | GlobalStep {global_step} | Loss: {loss.item():.4f} | "
                     f"CE: {outputs.loss.item():.4f} | Sub: {sub_talker_loss.item():.4f}"
                 )
+
+            if args.save_steps > 0 and global_step % args.save_steps == 0:
+                _save_checkpoint(
+                    accelerator=accelerator,
+                    model=model,
+                    processor=qwen3tts.processor,
+                    output_model_path=args.output_model_path,
+                    checkpoint_name=f"checkpoint-step-{global_step}",
+                )
+                if accelerator.is_main_process:
+                    accelerator.print(f"Saved checkpoint at global step {global_step}")
 
         _save_checkpoint(
             accelerator=accelerator,
             model=model,
             processor=qwen3tts.processor,
             output_model_path=args.output_model_path,
-            epoch=epoch,
+            checkpoint_name=f"checkpoint-epoch-{epoch}",
         )
 
 
