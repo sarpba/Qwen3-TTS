@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument("--sub_talker_loss_weight", type=float, default=0.3)
     parser.add_argument("--log_steps", type=int, default=10)
     parser.add_argument("--save_steps", type=int, default=0)
+    parser.add_argument("--resume_from_checkpoint", type=str, default=None)
     parser.add_argument("--new_language", type=str, required=True)
     parser.add_argument("--new_language_init_from", type=str, default="German")
     parser.add_argument("--new_language_codec_id", type=int, default=None)
@@ -136,7 +137,18 @@ def _register_new_language(model, language_name: str, init_from_language: str, r
     return new_language_key, new_language_id
 
 
-def _save_checkpoint(accelerator, model, processor, output_model_path, checkpoint_name, init_model_path=None):
+def _save_checkpoint(
+    accelerator,
+    model,
+    optimizer,
+    processor,
+    output_model_path,
+    checkpoint_name,
+    resume_epoch,
+    resume_step,
+    global_step,
+    init_model_path=None,
+):
     accelerator.wait_for_everyone()
     state_dict = accelerator.get_state_dict(model)
     if not accelerator.is_main_process:
@@ -189,8 +201,6 @@ def _save_checkpoint(accelerator, model, processor, output_model_path, checkpoin
         unwrapped_model.config.save_pretrained = original_config_save_pretrained
 
     processor.save_pretrained(output_dir)
-    if getattr(unwrapped_model, "speech_tokenizer", None) is not None:
-        unwrapped_model.speech_tokenizer.save_pretrained(os.path.join(output_dir, "speech_tokenizer"))
 
     if init_model_path is not None:
         try:
@@ -199,6 +209,47 @@ def _save_checkpoint(accelerator, model, processor, output_model_path, checkpoin
                 shutil.copy2(preprocessor_config_path, os.path.join(output_dir, "preprocessor_config.json"))
         except Exception:
             pass
+        try:
+            speech_tokenizer_config_path = cached_file(init_model_path, "speech_tokenizer/config.json")
+            if speech_tokenizer_config_path is not None:
+                speech_tokenizer_src_dir = os.path.dirname(speech_tokenizer_config_path)
+                speech_tokenizer_dst_dir = os.path.join(output_dir, "speech_tokenizer")
+                if os.path.exists(speech_tokenizer_dst_dir):
+                    shutil.rmtree(speech_tokenizer_dst_dir)
+                shutil.copytree(speech_tokenizer_src_dir, speech_tokenizer_dst_dir)
+        except Exception:
+            pass
+
+    accelerator_state_dir = os.path.join(output_dir, "accelerator_state")
+    os.makedirs(accelerator_state_dir, exist_ok=True)
+    accelerator.save_state(accelerator_state_dir)
+
+    trainer_state = {
+        "resume_epoch": int(resume_epoch),
+        "resume_step": int(resume_step),
+        "global_step": int(global_step),
+        "checkpoint_name": checkpoint_name,
+    }
+    with open(os.path.join(output_dir, "trainer_state.json"), "w", encoding="utf-8") as writer:
+        json.dump(trainer_state, writer, ensure_ascii=False, indent=2, sort_keys=True)
+        writer.write("\n")
+
+
+def _load_trainer_state(checkpoint_dir):
+    trainer_state_path = os.path.join(checkpoint_dir, "trainer_state.json")
+    if not os.path.exists(trainer_state_path):
+        return {
+            "resume_epoch": 0,
+            "resume_step": 0,
+            "global_step": 0,
+        }
+    with open(trainer_state_path, "r", encoding="utf-8") as reader:
+        payload = json.load(reader)
+    return {
+        "resume_epoch": int(payload.get("resume_epoch", 0)),
+        "resume_step": int(payload.get("resume_step", 0)),
+        "global_step": int(payload.get("global_step", 0)),
+    }
 
 
 def train():
@@ -291,10 +342,32 @@ def train():
     )
 
     model.train()
+    start_epoch = 0
+    start_step = 0
     global_step = 0
 
-    for epoch in range(args.num_epochs):
+    if args.resume_from_checkpoint:
+        checkpoint_dir = os.path.abspath(args.resume_from_checkpoint)
+        accelerator_state_dir = os.path.join(checkpoint_dir, "accelerator_state")
+        if not os.path.isdir(accelerator_state_dir):
+            raise ValueError(
+                f"`{args.resume_from_checkpoint}` does not contain `accelerator_state`, "
+                "so optimizer/trainer state cannot be resumed."
+            )
+        accelerator.load_state(accelerator_state_dir)
+        trainer_state = _load_trainer_state(checkpoint_dir)
+        start_epoch = trainer_state["resume_epoch"]
+        start_step = trainer_state["resume_step"]
+        global_step = trainer_state["global_step"]
+        accelerator.print(
+            f"Resuming from `{args.resume_from_checkpoint}` | "
+            f"epoch={start_epoch} | step={start_step} | global_step={global_step}"
+        )
+
+    for epoch in range(start_epoch, args.num_epochs):
         for step, batch in enumerate(train_dataloader):
+            if epoch == start_epoch and step < start_step:
+                continue
             global_step += 1
             with accelerator.accumulate(model):
                 input_ids = batch["input_ids"]
@@ -380,9 +453,13 @@ def train():
                 _save_checkpoint(
                     accelerator=accelerator,
                     model=model,
+                    optimizer=optimizer,
                     processor=qwen3tts.processor,
                     output_model_path=args.output_model_path,
                     checkpoint_name=f"checkpoint-step-{global_step}",
+                    resume_epoch=epoch,
+                    resume_step=step + 1,
+                    global_step=global_step,
                     init_model_path=args.init_model_path,
                 )
                 if accelerator.is_main_process:
@@ -391,9 +468,13 @@ def train():
         _save_checkpoint(
             accelerator=accelerator,
             model=model,
+            optimizer=optimizer,
             processor=qwen3tts.processor,
             output_model_path=args.output_model_path,
             checkpoint_name=f"checkpoint-epoch-{epoch}",
+            resume_epoch=epoch + 1,
+            resume_step=0,
+            global_step=global_step,
             init_model_path=args.init_model_path,
         )
 

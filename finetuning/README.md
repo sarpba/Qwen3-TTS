@@ -63,16 +63,20 @@ The script:
 Hungarian example:
 
 ```bash
-python sft_12hz.py \
+CUDA_VISIBLE_DEVICES=0 python -m finetuning.sft_12hz \
   --init_model_path Qwen/Qwen3-TTS-12Hz-1.7B-Base \
-  --output_model_path output \
-  --train_jsonl train_with_codes.jsonl \
-  --batch_size 32 \
+  --output_model_path ./output_hungarian_1p7b \
+  --train_jsonl ./train_with_codes.jsonl \
+  --batch_size 1 \
   --lr 2e-6 \
-  --num_epochs 10 \
+  --num_epochs 3 \
+  --gradient_accumulation_steps 4 \
+  --mixed_precision bf16 \
   --new_language Hungarian \
   --new_language_init_from German \
-  --xvector_only_ratio 0.2
+  --xvector_only_ratio 0.2 \
+  --save_steps 200 \
+  --resume_from_checkpoint ./output_hungarian_1p7b/checkpoint-step-100000
 ```
 
 Key arguments:
@@ -81,12 +85,14 @@ Key arguments:
 - `--new_language_init_from`: existing language used to initialize the new language embedding, for example `German`
 - `--new_language_codec_id`: optional manual token id; if omitted, the next free condition token id is used
 - `--xvector_only_ratio`: fraction of batches trained in `x_vector_only` mode; `0.0` means ICL-only training
+- `--save_steps`: optional step-based checkpoint interval; `0` disables intermediate saves
+- `--resume_from_checkpoint`: optional path to a previously saved checkpoint directory for full trainer-state resume
 
 Checkpoints are written to:
 
-- `output/checkpoint-epoch-0`
-- `output/checkpoint-epoch-1`
-- `output/checkpoint-epoch-2`
+- `output_hungarian_1p7b/checkpoint-step-200`
+- `output_hungarian_1p7b/checkpoint-step-400`
+- `output_hungarian_1p7b/checkpoint-epoch-0`
 
 ### 4) Quick inference test
 
@@ -142,14 +148,18 @@ python prepare_data.py \
   --input_jsonl ${RAW_JSONL} \
   --output_jsonl ${TRAIN_JSONL}
 
-python sft_12hz.py \
+CUDA_VISIBLE_DEVICES=0 python -m finetuning.sft_12hz \
   --init_model_path ${INIT_MODEL_PATH} \
   --output_model_path ${OUTPUT_DIR} \
   --train_jsonl ${TRAIN_JSONL} \
   --batch_size ${BATCH_SIZE} \
   --lr ${LR} \
   --num_epochs ${EPOCHS} \
+  --gradient_accumulation_steps 4 \
+  --mixed_precision bf16 \
   --new_language ${NEW_LANGUAGE} \
   --new_language_init_from ${INIT_FROM_LANGUAGE} \
-  --xvector_only_ratio ${XVECTOR_ONLY_RATIO}
+  --xvector_only_ratio ${XVECTOR_ONLY_RATIO} \
+  --save_steps 200 \
+  --resume_from_checkpoint ./output_hungarian_1p7b/checkpoint-step-100000
 ```

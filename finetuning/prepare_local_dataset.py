@@ -58,6 +58,27 @@ def parse_args():
     )
     parser.add_argument("-i", "--input", required=True, help="Root directory to scan.")
     parser.add_argument("-o", "--output", required=True, help="Output JSONL path.")
+    parser.add_argument(
+        "-t",
+        "--transcript-suffix",
+        default=".json",
+        help=(
+            "Suffix appended to the audio basename when locating transcript JSON files. "
+            "Default: .json"
+        ),
+    )
+    parser.add_argument(
+        "--min-samples-per-reference",
+        type=int,
+        default=5,
+        help="Keep only speaker/reference groups with at least this many audio files (default: 5).",
+    )
+    parser.add_argument(
+        "--max-samples-per-reference",
+        type=int,
+        default=0,
+        help="Keep at most this many audio files per reference group; 0 disables the cap (default: 0).",
+    )
     return parser.parse_args()
 
 
@@ -103,7 +124,14 @@ def normalize_language(raw_language: Optional[str]) -> Optional[str]:
     return language
 
 
-def build_leaf_samples(leaf_dir: str, stats: Counter) -> List[Sample]:
+def resolve_output_path(output_arg: str) -> str:
+    normalized = os.path.abspath(output_arg)
+    if output_arg.endswith(os.sep) or os.path.isdir(normalized):
+        return os.path.join(normalized, "dataset.jsonl")
+    return normalized
+
+
+def build_leaf_samples(leaf_dir: str, stats: Counter, transcript_suffix: str) -> List[Sample]:
     samples: List[Sample] = []
 
     for name in sorted(os.listdir(leaf_dir)):
@@ -116,7 +144,7 @@ def build_leaf_samples(leaf_dir: str, stats: Counter) -> List[Sample]:
             stats["skipped_bad_filename"] += 1
             continue
 
-        json_path = os.path.join(leaf_dir, f"{stem}.json")
+        json_path = os.path.join(leaf_dir, f"{stem}{transcript_suffix}")
         if not os.path.exists(json_path):
             stats["skipped_missing_json"] += 1
             continue
@@ -162,14 +190,40 @@ def deterministic_choice(leaf_dir: str, speaker: str, candidates: List[Sample]) 
     return pool[index]
 
 
-def build_records(root_dir: str) -> Tuple[List[Dict], Counter, Dict[str, List[Sample]]]:
+def deterministic_sample_subset(
+    leaf_dir: str,
+    speaker: str,
+    candidates: List[Sample],
+    max_samples: int,
+) -> List[Sample]:
+    if max_samples <= 0 or len(candidates) <= max_samples:
+        return sorted(candidates, key=lambda sample: sample.stem)
+
+    ranked = []
+    for sample in candidates:
+        digest = hashlib.sha256(
+            f"{leaf_dir}::{speaker}::{sample.stem}".encode("utf-8")
+        ).hexdigest()
+        ranked.append((digest, sample.stem, sample))
+
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    selected = [item[2] for item in ranked[:max_samples]]
+    return sorted(selected, key=lambda sample: sample.stem)
+
+
+def build_records(
+    root_dir: str,
+    transcript_suffix: str,
+    min_samples_per_reference: int,
+    max_samples_per_reference: int,
+) -> Tuple[List[Dict], Counter, Dict[str, List[Sample]]]:
     stats = Counter()
     records: List[Dict] = []
     ref_groups: Dict[str, List[Sample]] = defaultdict(list)
 
     for leaf_dir in sorted(iter_leaf_dirs(root_dir)):
         stats["leaf_dirs_seen"] += 1
-        samples = build_leaf_samples(leaf_dir, stats)
+        samples = build_leaf_samples(leaf_dir, stats, transcript_suffix)
         if not samples:
             stats["leaf_dirs_without_valid_samples"] += 1
             continue
@@ -179,25 +233,41 @@ def build_records(root_dir: str) -> Tuple[List[Dict], Counter, Dict[str, List[Sa
             grouped[sample.speaker].append(sample)
 
         ref_by_speaker: Dict[str, Sample] = {}
+        kept_samples_by_speaker: Dict[str, List[Sample]] = {}
         for speaker, speaker_samples in grouped.items():
-            ref_by_speaker[speaker] = deterministic_choice(leaf_dir, speaker, speaker_samples)
+            if len(speaker_samples) < min_samples_per_reference:
+                stats["skipped_small_reference_groups"] += 1
+                stats["skipped_small_reference_group_samples"] += len(speaker_samples)
+                continue
+            kept_samples = deterministic_sample_subset(
+                leaf_dir,
+                speaker,
+                speaker_samples,
+                max_samples_per_reference,
+            )
+            if len(kept_samples) < len(speaker_samples):
+                stats["capped_reference_groups"] += 1
+                stats["capped_reference_group_samples"] += len(speaker_samples) - len(kept_samples)
+            kept_samples_by_speaker[speaker] = kept_samples
+            ref_by_speaker[speaker] = deterministic_choice(leaf_dir, speaker, kept_samples)
             stats["speakers_seen"] += 1
 
-        for sample in samples:
-            ref_sample = ref_by_speaker[sample.speaker]
-            ref_groups[ref_sample.audio_path].append(sample)
-            records.append(
-                {
-                    "audio": sample.audio_path,
-                    "text": sample.transcript,
-                    "ref_audio": ref_sample.audio_path,
-                    "ref_text": ref_sample.transcript,
-                    "language": sample.language,
-                }
-            )
-            stats["records_written"] += 1
-            if sample.audio_path == ref_sample.audio_path:
-                stats["records_using_self_reference"] += 1
+        for speaker, kept_samples in kept_samples_by_speaker.items():
+            ref_sample = ref_by_speaker[speaker]
+            for sample in kept_samples:
+                ref_groups[ref_sample.audio_path].append(sample)
+                records.append(
+                    {
+                        "audio": sample.audio_path,
+                        "text": sample.transcript,
+                        "ref_audio": ref_sample.audio_path,
+                        "ref_text": ref_sample.transcript,
+                        "language": sample.language,
+                    }
+                )
+                stats["records_written"] += 1
+                if sample.audio_path == ref_sample.audio_path:
+                    stats["records_using_self_reference"] += 1
 
     return records, stats, ref_groups
 
@@ -241,14 +311,20 @@ def print_summary(records: List[Dict], stats: Counter, ref_groups: Dict[str, Lis
 
 def main():
     args = parse_args()
-    records, stats, ref_groups = build_records(args.input)
+    records, stats, ref_groups = build_records(
+        args.input,
+        args.transcript_suffix,
+        args.min_samples_per_reference,
+        args.max_samples_per_reference,
+    )
+    output_path = resolve_output_path(args.output)
 
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    with open(args.output, "w", encoding="utf-8") as handle:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    print_summary(records, stats, ref_groups, args.output)
+    print_summary(records, stats, ref_groups, output_path)
 
 
 if __name__ == "__main__":
