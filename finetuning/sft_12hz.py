@@ -17,6 +17,7 @@ import argparse
 import copy
 import json
 import os
+import shutil
 from typing import Dict
 
 import torch
@@ -24,6 +25,7 @@ from accelerate import Accelerator
 from accelerate.utils import ProjectConfiguration
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
+from transformers.utils.hub import cached_file
 
 from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
 
@@ -134,7 +136,7 @@ def _register_new_language(model, language_name: str, init_from_language: str, r
     return new_language_key, new_language_id
 
 
-def _save_checkpoint(accelerator, model, processor, output_model_path, checkpoint_name):
+def _save_checkpoint(accelerator, model, processor, output_model_path, checkpoint_name, init_model_path=None):
     accelerator.wait_for_everyone()
     state_dict = accelerator.get_state_dict(model)
     if not accelerator.is_main_process:
@@ -166,6 +168,10 @@ def _save_checkpoint(accelerator, model, processor, output_model_path, checkpoin
         output_config_file = os.path.join(save_directory, "config.json")
         config_dict = copy.deepcopy(unwrapped_model.config.to_dict())
         config_dict.pop("save_pretrained", None)
+        speaker_encoder_config = config_dict.get("speaker_encoder_config")
+        if isinstance(speaker_encoder_config, dict):
+            speaker_encoder_config.pop("dtype", None)
+            speaker_encoder_config.pop("model_type", None)
         config_dict = _sanitize_for_json(config_dict)
         with open(output_config_file, "w", encoding="utf-8") as writer:
             json.dump(config_dict, writer, ensure_ascii=False, indent=2, sort_keys=True)
@@ -183,6 +189,16 @@ def _save_checkpoint(accelerator, model, processor, output_model_path, checkpoin
         unwrapped_model.config.save_pretrained = original_config_save_pretrained
 
     processor.save_pretrained(output_dir)
+    if getattr(unwrapped_model, "speech_tokenizer", None) is not None:
+        unwrapped_model.speech_tokenizer.save_pretrained(os.path.join(output_dir, "speech_tokenizer"))
+
+    if init_model_path is not None:
+        try:
+            preprocessor_config_path = cached_file(init_model_path, "preprocessor_config.json")
+            if preprocessor_config_path is not None:
+                shutil.copy2(preprocessor_config_path, os.path.join(output_dir, "preprocessor_config.json"))
+        except Exception:
+            pass
 
 
 def train():
@@ -299,7 +315,9 @@ def train():
                 input_text_ids = input_ids[:, :, 0]
                 input_codec_ids = input_ids[:, :, 1]
 
-                input_text_embedding = model.talker.model.text_embedding(input_text_ids) * text_embedding_mask
+                input_text_embedding = model.talker.text_projection(
+                    model.talker.model.text_embedding(input_text_ids)
+                ) * text_embedding_mask
                 input_codec_embedding = model.talker.model.codec_embedding(input_codec_ids) * codec_embedding_mask
 
                 batch_indices = torch.arange(input_ids.shape[0], device=input_ids.device)
@@ -365,6 +383,7 @@ def train():
                     processor=qwen3tts.processor,
                     output_model_path=args.output_model_path,
                     checkpoint_name=f"checkpoint-step-{global_step}",
+                    init_model_path=args.init_model_path,
                 )
                 if accelerator.is_main_process:
                     accelerator.print(f"Saved checkpoint at global step {global_step}")
@@ -375,6 +394,7 @@ def train():
             processor=qwen3tts.processor,
             output_model_path=args.output_model_path,
             checkpoint_name=f"checkpoint-epoch-{epoch}",
+            init_model_path=args.init_model_path,
         )
 
     accelerator.end_training()
